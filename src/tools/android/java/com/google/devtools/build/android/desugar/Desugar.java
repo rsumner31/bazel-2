@@ -196,6 +196,15 @@ class Desugar {
     public boolean tolerateMissingDependencies;
 
     @Option(
+      name = "desugar_supported_core_libs",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
+      effectTags = {OptionEffectTag.UNKNOWN},
+      help = "Enable core library desugaring, which requires configuration with related flags."
+    )
+    public boolean desugarCoreLibs;
+
+    @Option(
       name = "desugar_interface_method_bodies_if_needed",
       defaultValue = "true",
       category = "misc",
@@ -282,6 +291,17 @@ class Desugar {
           + "The new owner is blindly assumed to exist."
     )
     public List<String> retargetCoreLibraryMembers;
+
+    /** Members not to rewrite. */
+    @Option(
+      name = "dont_rewrite_core_library_invocation",
+      defaultValue = "", // ignored
+      allowMultiple = true,
+      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
+      effectTags = {OptionEffectTag.UNKNOWN},
+      help = "Method invocations not to rewrite, given as \"class/Name#method\"."
+    )
+    public List<String> dontTouchCoreLibraryMembers;
 
     /** Set to work around b/62623509 with JaCoCo versions prior to 0.7.9. */
     // TODO(kmb): Remove when Android Studio doesn't need it anymore (see b/37116789)
@@ -393,15 +413,15 @@ class Desugar {
       ImmutableSet.Builder<String> interfaceLambdaMethodCollector = ImmutableSet.builder();
       ClassVsInterface interfaceCache = new ClassVsInterface(classpathReader);
       CoreLibrarySupport coreLibrarySupport =
-          options.rewriteCoreLibraryPrefixes.isEmpty()
-                  && options.emulateCoreLibraryInterfaces.isEmpty()
-              ? null
-              : new CoreLibrarySupport(
+          options.desugarCoreLibs
+              ? new CoreLibrarySupport(
                   rewriter,
                   loader,
-                  ImmutableList.copyOf(options.rewriteCoreLibraryPrefixes),
-                  ImmutableList.copyOf(options.emulateCoreLibraryInterfaces),
-                  options.retargetCoreLibraryMembers);
+                  options.rewriteCoreLibraryPrefixes,
+                  options.emulateCoreLibraryInterfaces,
+                  options.retargetCoreLibraryMembers,
+                  options.dontTouchCoreLibraryMembers)
+              : null;
 
       desugarClassesInInput(
           inputFiles,
@@ -606,6 +626,9 @@ class Desugar {
       @Nullable CoreLibrarySupport coreLibrarySupport)
       throws IOException {
     // Write out any classes we generated along the way
+    if (coreLibrarySupport != null) {
+      coreLibrarySupport.makeDispatchHelpers(store);
+    }
     ImmutableMap<String, ClassNode> generatedClasses = store.drain();
     checkState(
         generatedClasses.isEmpty() || (allowDefaultMethods && outputJava7),
@@ -617,6 +640,7 @@ class Desugar {
       // Don't need a ClassReaderFactory b/c static interface methods should've been moved.
       ClassVisitor visitor = writer;
       if (coreLibrarySupport != null) {
+        visitor = new EmulatedInterfaceRewriter(visitor, coreLibrarySupport);
         visitor = new CorePackageRenamer(visitor, coreLibrarySupport);
         visitor = new CoreLibraryInvocationRewriter(visitor, coreLibrarySupport);
       }
@@ -669,6 +693,7 @@ class Desugar {
     ClassVisitor visitor = checkNotNull(writer);
 
     if (coreLibrarySupport != null) {
+      visitor = new EmulatedInterfaceRewriter(visitor, coreLibrarySupport);
       visitor = new CorePackageRenamer(visitor, coreLibrarySupport);
       visitor = new CoreLibraryInvocationRewriter(visitor, coreLibrarySupport);
     }
@@ -709,6 +734,7 @@ class Desugar {
                 visitor,
                 interfaceCache,
                 depsCollector,
+                coreLibrarySupport,
                 bootclasspathReader,
                 loader,
                 store,
@@ -751,6 +777,7 @@ class Desugar {
     ClassVisitor visitor = checkNotNull(writer);
 
     if (coreLibrarySupport != null) {
+      visitor = new EmulatedInterfaceRewriter(visitor, coreLibrarySupport);
       visitor = new CorePackageRenamer(visitor, coreLibrarySupport);
       visitor = new CoreLibraryInvocationRewriter(visitor, coreLibrarySupport);
     }
@@ -789,6 +816,7 @@ class Desugar {
                   visitor,
                   interfaceCache,
                   depsCollector,
+                  coreLibrarySupport,
                   bootclasspathReader,
                   loader,
                   store,
@@ -897,6 +925,10 @@ class Desugar {
     for (Path path : options.bootclasspath) {
       checkArgument(!Files.isDirectory(path), "Bootclasspath entry must be a jar file: %s", path);
     }
+    checkArgument(!options.desugarCoreLibs
+        || !options.rewriteCoreLibraryPrefixes.isEmpty()
+        || !options.emulateCoreLibraryInterfaces.isEmpty(),
+        "--desugar_supported_core_libs requires specifying renamed and/or emulated core libraries");
     return options;
   }
 

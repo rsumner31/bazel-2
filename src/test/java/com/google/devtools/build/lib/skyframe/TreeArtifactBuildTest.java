@@ -34,12 +34,14 @@ import com.google.devtools.build.lib.actions.ActionInputFileCache;
 import com.google.devtools.build.lib.actions.ActionInputHelper;
 import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.actions.ActionResult;
+import com.google.devtools.build.lib.actions.Actions;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Artifact.SpecialArtifact;
 import com.google.devtools.build.lib.actions.Artifact.SpecialArtifactType;
 import com.google.devtools.build.lib.actions.Artifact.TreeFileArtifact;
 import com.google.devtools.build.lib.actions.ArtifactRoot;
 import com.google.devtools.build.lib.actions.BuildFailedException;
+import com.google.devtools.build.lib.actions.MutableActionGraph.ActionConflictException;
 import com.google.devtools.build.lib.actions.cache.MetadataHandler;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
 import com.google.devtools.build.lib.actions.util.TestAction;
@@ -48,7 +50,7 @@ import com.google.devtools.build.lib.analysis.actions.SpawnActionTemplate;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventKind;
 import com.google.devtools.build.lib.events.StoredEventHandler;
-import com.google.devtools.build.lib.skyframe.serialization.testutils.ObjectCodecTester;
+import com.google.devtools.build.lib.skyframe.serialization.testutils.SerializationTester;
 import com.google.devtools.build.lib.testutil.TestUtils;
 import com.google.devtools.build.lib.vfs.FileStatus;
 import com.google.devtools.build.lib.vfs.FileSystem;
@@ -113,10 +115,9 @@ public class TreeArtifactBuildTest extends TimestampBuilderTestCase {
 
   @Test
   public void testCodec() throws Exception {
-    ObjectCodecTester.newBuilder(Artifact.CODEC)
-        .addSubjects(outOne, outOneFileOne)
+    new SerializationTester(outOne, outOneFileOne)
         .addDependency(FileSystem.class, scratch.getFileSystem())
-        .buildAndRunTests();
+        .runTests();
   }
 
   /** Simple smoke test. If this isn't passing, something is very wrong... */
@@ -1232,7 +1233,12 @@ public class TreeArtifactBuildTest extends TimestampBuilderTestCase {
 
     @Override
     public SkyValue compute(SkyKey skyKey, Environment env) {
-      return new ActionTemplateExpansionValue(actionKeyContext, actions, false);
+      try {
+        return new ActionTemplateExpansionValue(
+            Actions.filterSharedActionsAndThrowActionConflict(actionKeyContext, actions), false);
+      } catch (ActionConflictException e) {
+        throw new IllegalStateException(e);
+      }
     }
 
     @Override

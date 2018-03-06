@@ -22,7 +22,7 @@ import static org.mockito.Mockito.when;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.testing.EqualsTester;
-import com.google.devtools.build.lib.actions.Actions;
+import com.google.devtools.build.lib.actions.Actions.GeneratingActions;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.platform.PlatformInfo;
 import com.google.devtools.build.lib.cmdline.Label;
@@ -48,7 +48,7 @@ public class ToolchainResolutionFunctionTest extends ToolchainTestCase {
       ConfiguredTarget configuredTarget) {
     return new ConfiguredTargetValue(
         configuredTarget,
-        new Actions.GeneratingActions(ImmutableList.of(), ImmutableMap.of()),
+        GeneratingActions.EMPTY,
         NestedSetBuilder.emptySet(Order.STABLE_ORDER),
         /*removeActionsAfterEvaluation=*/ false);
   }
@@ -88,7 +88,7 @@ public class ToolchainResolutionFunctionTest extends ToolchainTestCase {
 
     ToolchainResolutionValue toolchainResolutionValue = result.get(key);
     assertThat(toolchainResolutionValue.availableToolchainLabels())
-        .containsExactly(macPlatform, makeLabel("//toolchain:toolchain_2_impl"));
+        .containsExactly(MAC_CTKEY, makeLabel("//toolchain:toolchain_2_impl"));
   }
 
   @Test
@@ -118,9 +118,9 @@ public class ToolchainResolutionFunctionTest extends ToolchainTestCase {
     ToolchainResolutionValue toolchainResolutionValue = result.get(key);
     assertThat(toolchainResolutionValue.availableToolchainLabels())
         .containsExactly(
-            linuxPlatform,
+            LINUX_CTKEY,
             makeLabel("//extra:extra_toolchain_impl"),
-            macPlatform,
+            MAC_CTKEY,
             makeLabel("//toolchain:toolchain_2_impl"));
   }
 
@@ -146,37 +146,27 @@ public class ToolchainResolutionFunctionTest extends ToolchainTestCase {
     new EqualsTester()
         .addEqualityGroup(
             ToolchainResolutionValue.create(
-                ImmutableMap.<PlatformInfo, Label>builder()
-                    .put(linuxPlatform, makeLabel("//test:toolchain_impl_1"))
-                    .build()),
+                ImmutableMap.of(LINUX_CTKEY, makeLabel("//test:toolchain_impl_1"))),
             ToolchainResolutionValue.create(
-                ImmutableMap.<PlatformInfo, Label>builder()
-                    .put(linuxPlatform, makeLabel("//test:toolchain_impl_1"))
-                    .build()))
+                ImmutableMap.of(LINUX_CTKEY, makeLabel("//test:toolchain_impl_1"))))
         // Different execution platform, same label.
         .addEqualityGroup(
             ToolchainResolutionValue.create(
-                ImmutableMap.<PlatformInfo, Label>builder()
-                    .put(macPlatform, makeLabel("//test:toolchain_impl_1"))
-                    .build()))
+                ImmutableMap.of(MAC_CTKEY, makeLabel("//test:toolchain_impl_1"))))
         // Same execution platform, different label.
         .addEqualityGroup(
             ToolchainResolutionValue.create(
-                ImmutableMap.<PlatformInfo, Label>builder()
-                    .put(linuxPlatform, makeLabel("//test:toolchain_impl_2"))
-                    .build()))
+                ImmutableMap.of(LINUX_CTKEY, makeLabel("//test:toolchain_impl_2"))))
         // Different execution platform, different label.
         .addEqualityGroup(
             ToolchainResolutionValue.create(
-                ImmutableMap.<PlatformInfo, Label>builder()
-                    .put(macPlatform, makeLabel("//test:toolchain_impl_2"))
-                    .build()))
+                ImmutableMap.of(MAC_CTKEY, makeLabel("//test:toolchain_impl_2"))))
         // Multiple execution platforms.
         .addEqualityGroup(
             ToolchainResolutionValue.create(
-                ImmutableMap.<PlatformInfo, Label>builder()
-                    .put(linuxPlatform, makeLabel("//test:toolchain_impl_1"))
-                    .put(macPlatform, makeLabel("//test:toolchain_impl_1"))
+                ImmutableMap.<ConfiguredTargetKey, Label>builder()
+                    .put(LINUX_CTKEY, makeLabel("//test:toolchain_impl_1"))
+                    .put(MAC_CTKEY, makeLabel("//test:toolchain_impl_1"))
                     .build()));
   }
 }

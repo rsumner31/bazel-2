@@ -15,7 +15,7 @@
 package com.google.devtools.build.lib.syntax;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.devtools.build.lib.testutil.MoreAsserts.expectThrows;
+import static com.google.devtools.build.lib.testutil.MoreAsserts.assertThrows;
 import static org.junit.Assert.fail;
 
 import com.google.common.collect.ImmutableMap;
@@ -100,9 +100,7 @@ public class EnvironmentTest extends EvaluationTestCase {
   public void testBuilderRequiresSemantics() throws Exception {
     try (Mutability mut = Mutability.create("test")) {
       IllegalArgumentException expected =
-          expectThrows(
-              IllegalArgumentException.class,
-              () -> Environment.builder(mut).build());
+          assertThrows(IllegalArgumentException.class, () -> Environment.builder(mut).build());
       assertThat(expected).hasMessageThat()
           .contains("must call either setSemantics or useDefaultSemantics");
     }
@@ -282,7 +280,7 @@ public class EnvironmentTest extends EvaluationTestCase {
     parentEnv.update("a", 1);
     parentEnv.update("c", 2);
     parentEnv.update("b", 3);
-    Environment.Frame parentFrame = parentEnv.getGlobals();
+    Environment.GlobalFrame parentFrame = parentEnv.getGlobals();
     parentMutability.freeze();
     Mutability mutability = Mutability.create("testing");
     Environment env = Environment.builder(mutability)
@@ -366,9 +364,7 @@ public class EnvironmentTest extends EvaluationTestCase {
   private static void assertCheckStateFailsWithMessage(
       Extension left, Object right, String substring) {
     IllegalStateException expected =
-        expectThrows(
-            IllegalStateException.class,
-            () -> left.checkStateEquals(right));
+        assertThrows(IllegalStateException.class, () -> left.checkStateEquals(right));
     assertThat(expected).hasMessageThat().contains(substring);
   }
 }

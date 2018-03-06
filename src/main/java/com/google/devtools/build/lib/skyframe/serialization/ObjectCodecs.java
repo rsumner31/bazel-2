@@ -36,10 +36,31 @@ public class ObjectCodecs {
    * Creates an instance using the supplied {@link ObjectCodecRegistry} for looking up {@link
    * ObjectCodec}s.
    */
-  ObjectCodecs(ObjectCodecRegistry codecRegistry, ImmutableMap<Class<?>, Object> dependencies) {
+  public ObjectCodecs(
+      ObjectCodecRegistry codecRegistry, ImmutableMap<Class<?>, Object> dependencies) {
     this.codecRegistry = codecRegistry;
-    serializationContext = new SerializationContext(dependencies);
-    deserializationContext = new DeserializationContext(dependencies);
+    serializationContext = new SerializationContext(codecRegistry, dependencies);
+    deserializationContext = new DeserializationContext(codecRegistry, dependencies);
+  }
+
+  public ByteString serialize(Object subject) throws SerializationException {
+    ByteString.Output resultOut = ByteString.newOutput();
+    CodedOutputStream codedOut = CodedOutputStream.newInstance(resultOut);
+    try {
+      serializationContext.serialize(subject, codedOut);
+      codedOut.flush();
+      return resultOut.toByteString();
+    } catch (IOException e) {
+      throw new SerializationException("Failed to serialize " + subject, e);
+    }
+  }
+
+  public void serialize(Object subject, CodedOutputStream codedOut) throws SerializationException {
+    try {
+      serializationContext.serialize(subject, codedOut);
+    } catch (IOException e) {
+      throw new SerializationException("Failed to serialize " + subject, e);
+    }
   }
 
   /**
@@ -75,6 +96,18 @@ public class ObjectCodecs {
     } catch (IOException e) {
       throw new SerializationException(
           "Failed to serialize " + subject + " using " + codec + " for " + classifier, e);
+    }
+  }
+
+  public Object deserialize(ByteString data) throws SerializationException {
+    return deserialize(data.newCodedInput());
+  }
+
+  public Object deserialize(CodedInputStream codedIn) throws SerializationException {
+    try {
+      return deserializationContext.deserialize(codedIn);
+    } catch (IOException e) {
+      throw new SerializationException("Failed to deserialize data", e);
     }
   }
 

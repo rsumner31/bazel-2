@@ -19,9 +19,8 @@ import com.google.common.base.Objects;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Interner;
-import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
-import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.actions.ActionLookupValue;
+import com.google.devtools.build.lib.actions.Actions.GeneratingActions;
 import com.google.devtools.build.lib.analysis.ConfiguredAspect;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.cmdline.Label;
@@ -35,11 +34,9 @@ import com.google.devtools.build.lib.packages.AspectParameters;
 import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.skyframe.BuildConfigurationValue.Key;
 import com.google.devtools.build.lib.skyframe.ConfiguredTargetKey.KeyAndHost;
-import com.google.devtools.build.lib.skyframe.serialization.ObjectCodec;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec;
 import com.google.devtools.build.lib.syntax.SkylarkImport;
 import com.google.devtools.build.skyframe.SkyFunctionName;
-import java.util.List;
 import javax.annotation.Nullable;
 
 /**
@@ -57,7 +54,6 @@ public final class AspectValue extends ActionLookupValue {
   /** A base class for a key representing an aspect applied to a particular target. */
   @AutoCodec
   public static class AspectKey extends AspectValueKey {
-    public static final ObjectCodec<AspectKey> CODEC = new AspectValue_AspectKey_AutoCodec();
     private final Label label;
     private final ImmutableList<AspectKey> baseKeys;
     private final BuildConfigurationValue.Key aspectConfigurationKey;
@@ -276,8 +272,6 @@ public final class AspectValue extends ActionLookupValue {
 
   /** An {@link AspectKey} for an aspect in the host configuration. */
   static class HostAspectKey extends AspectKey {
-    static final ObjectCodec<AspectKey> CODEC = AspectKey.CODEC;
-
     private HostAspectKey(
         Label label,
         Key aspectConfigurationKey,
@@ -444,11 +438,10 @@ public final class AspectValue extends ActionLookupValue {
       Label label,
       Location location,
       ConfiguredAspect configuredAspect,
-      ActionKeyContext actionKeyContext,
-      List<ActionAnalysisMetadata> actions,
+      GeneratingActions actions,
       NestedSet<Package> transitivePackagesForPackageRootResolution,
       boolean removeActionsAfterEvaluation) {
-    super(actionKeyContext, actions, removeActionsAfterEvaluation);
+    super(actions, removeActionsAfterEvaluation);
     this.label = Preconditions.checkNotNull(label, actions);
     this.aspect = Preconditions.checkNotNull(aspect, label);
     this.location = Preconditions.checkNotNull(location, label);

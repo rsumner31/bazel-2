@@ -1,4 +1,4 @@
-// Copyright 2017 The Bazel Authors. All rights reserved.
+// Copyright 2018 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,15 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.bazel.rules.cpp;
-
-import com.google.devtools.build.lib.rules.cpp.CcSharedLibrary;
+package com.google.devtools.build.lib.skyframe.serialization.autocodec;
 
 /**
- * {@code cc_shared_library} rule with Bazel semantics.
+ * Marker interface to indicate that an implementation provides a constant object that should be
+ * registered for serialization. Should never be implemented manually, only by {@code
+ * AutoCodecProcessor}-generated classes.
  */
-public class BazelCcSharedLibrary extends CcSharedLibrary {
-  public BazelCcSharedLibrary() {
-    super(BazelCppSemantics.INSTANCE);
-  }
-}
+public interface RegisteredSingletonDoNotUse {}

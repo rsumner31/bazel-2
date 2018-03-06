@@ -23,7 +23,6 @@ import com.google.devtools.build.lib.analysis.FileProvider;
 import com.google.devtools.build.lib.analysis.FilesToRunProvider;
 import com.google.devtools.build.lib.analysis.OutputGroupInfo;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
-import com.google.devtools.build.lib.analysis.TargetContext;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.analysis.VisibilityProvider;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
@@ -63,15 +62,14 @@ public abstract class AbstractConfiguredTarget
   private static final String DEFAULT_RUNFILES_FIELD = "default_runfiles";
 
   public AbstractConfiguredTarget(Label label, BuildConfiguration configuration) {
-    this.label = label;
-    this.configuration = configuration;
-    this.visibility = NestedSetBuilder.emptySet(Order.STABLE_ORDER);
+    this(label, configuration, NestedSetBuilder.emptySet(Order.STABLE_ORDER));
   }
 
-  public AbstractConfiguredTarget(TargetContext targetContext) {
-    this.label = targetContext.getTarget().getLabel();
-    this.configuration = targetContext.getConfiguration();
-    this.visibility = targetContext.getVisibility();
+  protected AbstractConfiguredTarget(
+      Label label, BuildConfiguration configuration, NestedSet<PackageGroupContents> visibility) {
+    this.label = label;
+    this.configuration = configuration;
+    this.visibility = visibility;
   }
 
   @Override

@@ -28,6 +28,7 @@ import com.squareup.javapoet.TypeName;
 import com.squareup.javapoet.TypeSpec;
 import java.io.IOException;
 import java.util.stream.Collectors;
+import javax.annotation.processing.ProcessingEnvironment;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.TypeElement;
@@ -43,20 +44,24 @@ class AutoCodecUtil {
    *
    * @param encodedType type being serialized
    */
-  static TypeSpec.Builder initializeCodecClassBuilder(TypeElement encodedType) {
+  static TypeSpec.Builder initializeCodecClassBuilder(
+      TypeElement encodedType, ProcessingEnvironment env) {
     TypeSpec.Builder builder = TypeSpec.classBuilder(getCodecName(encodedType));
     return builder.addSuperinterface(
         ParameterizedTypeName.get(
-            ClassName.get(ObjectCodec.class), TypeName.get(encodedType.asType())));
+            ClassName.get(ObjectCodec.class),
+            TypeName.get(env.getTypeUtils().erasure(encodedType.asType()))));
   }
 
-  static MethodSpec.Builder initializeGetEncodedClassMethod(TypeElement encodedType) {
+  static MethodSpec.Builder initializeGetEncodedClassMethod(
+      TypeElement encodedType, ProcessingEnvironment env) {
     return MethodSpec.methodBuilder("getEncodedClass")
         .addModifiers(Modifier.PUBLIC)
         .addAnnotation(Override.class)
         .returns(
             ParameterizedTypeName.get(
-                ClassName.get(Class.class), TypeName.get(encodedType.asType())));
+                ClassName.get(Class.class),
+                TypeName.get(env.getTypeUtils().erasure(encodedType.asType()))));
   }
 
   /**
@@ -64,7 +69,8 @@ class AutoCodecUtil {
    *
    * @param encodedType type being serialized
    */
-  static MethodSpec.Builder initializeSerializeMethodBuilder(TypeElement encodedType) {
+  static MethodSpec.Builder initializeSerializeMethodBuilder(
+      TypeElement encodedType, ProcessingEnvironment env) {
     MethodSpec.Builder builder =
         MethodSpec.methodBuilder("serialize")
             .addModifiers(Modifier.PUBLIC)
@@ -74,7 +80,7 @@ class AutoCodecUtil {
             .addException(IOException.class);
     return builder
         .addParameter(SerializationContext.class, "context")
-        .addParameter(TypeName.get(encodedType.asType()), "input")
+        .addParameter(TypeName.get(env.getTypeUtils().erasure(encodedType.asType())), "input")
         .addParameter(CodedOutputStream.class, "codedOut");
   }
 
@@ -83,11 +89,12 @@ class AutoCodecUtil {
    *
    * @param encodedType type being serialized
    */
-  static MethodSpec.Builder initializeDeserializeMethodBuilder(TypeElement encodedType) {
+  static MethodSpec.Builder initializeDeserializeMethodBuilder(
+      TypeElement encodedType, ProcessingEnvironment env) {
     MethodSpec.Builder builder =
         MethodSpec.methodBuilder("deserialize")
             .addModifiers(Modifier.PUBLIC)
-            .returns(TypeName.get(encodedType.asType()))
+            .returns(TypeName.get(env.getTypeUtils().erasure(encodedType.asType())))
             .addAnnotation(Override.class)
             .addException(SerializationException.class)
             .addException(IOException.class);
@@ -97,17 +104,26 @@ class AutoCodecUtil {
   }
 
   /**
-   * Name of the generated codec class.
+   * Returns a class name generated from the given {@code element}.
    *
-   * <p>For {@code Foo.Bar} this is {@code Foo_Bar_AutoCodec}.
+   * <p>For {@code Foo.Bar} this is {@code Foo_Bar_suffix}.
    */
-  private static String getCodecName(Element element) {
+  static String getGeneratedName(Element element, String suffix) {
     ImmutableList.Builder<String> classNamesBuilder = new ImmutableList.Builder<>();
-    classNamesBuilder.add(GENERATED_CLASS_NAME_SUFFIX);
+    classNamesBuilder.add(suffix);
     do {
       classNamesBuilder.add(element.getSimpleName().toString());
       element = element.getEnclosingElement();
     } while (element instanceof TypeElement);
     return classNamesBuilder.build().reverse().stream().collect(Collectors.joining("_"));
+  }
+
+  /**
+   * Name of the generated codec class.
+   *
+   * <p>For {@code Foo.Bar} this is {@code Foo_Bar_AutoCodec}.
+   */
+  private static String getCodecName(Element element) {
+    return getGeneratedName(element, GENERATED_CLASS_NAME_SUFFIX);
   }
 }

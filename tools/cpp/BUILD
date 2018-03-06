@@ -106,12 +106,12 @@ cc_toolchain(
 
 cc_toolchain(
     name = "cc-compiler-darwin",
-    all_files = ":empty",
-    compiler_files = ":empty",
+    all_files = ":osx_wrapper",
+    compiler_files = ":osx_wrapper",
     cpu = "darwin",
     dwp_files = ":empty",
     dynamic_runtime_libs = [":empty"],
-    linker_files = ":empty",
+    linker_files = ":osx_wrapper",
     objcopy_files = ":empty",
     static_runtime_libs = [":empty"],
     strip_files = ":empty",
@@ -205,6 +205,11 @@ filegroup(
     srcs = ["link_dynamic_library.sh"],
 )
 
+filegroup(
+    name = "osx_wrapper",
+    srcs = ["osx_cc_wrapper.sh"],
+)
+
 cc_toolchain_type(name = "toolchain_type")
 
 # A dummy toolchain is necessary to satisfy toolchain resolution until platforms
@@ -219,3 +224,9 @@ toolchain(
 load(":dummy_toolchain.bzl", "dummy_toolchain")
 
 dummy_toolchain(name = "dummy_cc_toolchain_impl")
+
+filegroup(
+    name = "lib_cc_configure",
+    srcs = ["lib_cc_configure.bzl"],
+    visibility = ["//visibility:public"],
+)

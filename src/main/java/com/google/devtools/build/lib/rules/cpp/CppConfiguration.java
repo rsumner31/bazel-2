@@ -41,7 +41,6 @@ import com.google.devtools.build.lib.rules.cpp.CppConfigurationLoader.CppConfigu
 import com.google.devtools.build.lib.rules.cpp.CrosstoolConfigurationLoader.CrosstoolFile;
 import com.google.devtools.build.lib.rules.cpp.transitions.ContextCollectorOwnerTransition;
 import com.google.devtools.build.lib.rules.cpp.transitions.DisableLipoTransition;
-import com.google.devtools.build.lib.skyframe.serialization.ObjectCodec;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkCallable;
 import com.google.devtools.build.lib.skylarkinterface.SkylarkModule;
@@ -67,8 +66,6 @@ import javax.annotation.Nullable;
 )
 @Immutable
 public final class CppConfiguration extends BuildConfiguration.Fragment {
-  public static final ObjectCodec<CppConfiguration> CODEC = new CppConfiguration_AutoCodec();
-
   /**
    * String indicating a Mac system, for example when used in a crosstool configuration's host or
    * target system name.
@@ -199,6 +196,8 @@ public final class CppConfiguration extends BuildConfiguration.Fragment {
   private final CompilationMode compilationMode;
 
   private final boolean shouldProvideMakeVariables;
+  private final boolean dropFullyStaticLinkingMode;
+
 
   /**
    * If true, the ConfiguredTarget is only used to get the necessary cross-referenced {@code
@@ -320,6 +319,7 @@ public final class CppConfiguration extends BuildConfiguration.Fragment {
                 && compilationMode == CompilationMode.FASTBUILD)),
         compilationMode,
         params.commonOptions.makeVariableSource == MakeVariableSource.CONFIGURATION,
+        cppOptions.dropFullyStaticLinkingMode,
         cppOptions.isLipoContextCollector(),
         cppToolchainInfo);
   }
@@ -354,6 +354,7 @@ public final class CppConfiguration extends BuildConfiguration.Fragment {
       boolean stripBinaries,
       CompilationMode compilationMode,
       boolean shouldProvideMakeVariables,
+      boolean dropFullyStaticLinkingMode,
       boolean lipoContextCollector,
       CppToolchainInfo cppToolchainInfo) {
     this.crosstoolTop = crosstoolTop;
@@ -384,6 +385,7 @@ public final class CppConfiguration extends BuildConfiguration.Fragment {
     this.stripBinaries = stripBinaries;
     this.compilationMode = compilationMode;
     this.shouldProvideMakeVariables = shouldProvideMakeVariables;
+    this.dropFullyStaticLinkingMode = dropFullyStaticLinkingMode;
     this.lipoContextCollector = lipoContextCollector;
     this.cppToolchainInfo = cppToolchainInfo;
   }
@@ -703,6 +705,9 @@ public final class CppConfiguration extends BuildConfiguration.Fragment {
   }
 
   public boolean hasStaticLinkOption() {
+    if (dropFullyStaticLinkingMode()) {
+      return false;
+    }
     return linkOptions.contains("-static");
   }
 
@@ -868,6 +873,10 @@ public final class CppConfiguration extends BuildConfiguration.Fragment {
   /** Returns true if lipo should be converted to thinlto. */
   public boolean shouldConvertLipoToThinLto() {
     return convertLipoToThinLto;
+  }
+
+  public boolean dropFullyStaticLinkingMode() {
+    return dropFullyStaticLinkingMode;
   }
 
   public boolean isFdo() {

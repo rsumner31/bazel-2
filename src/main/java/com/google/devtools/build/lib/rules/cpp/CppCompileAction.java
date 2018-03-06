@@ -57,7 +57,6 @@ import com.google.devtools.build.lib.rules.cpp.CcCommon.CoptsFilter;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.FeatureConfiguration;
 import com.google.devtools.build.lib.rules.cpp.CppCompileActionContext.Reply;
 import com.google.devtools.build.lib.rules.cpp.CppHelper.PregreppedHeader;
-import com.google.devtools.build.lib.skyframe.serialization.ObjectCodec;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec.VisibleForSerialization;
 import com.google.devtools.build.lib.util.DependencySet;
@@ -90,8 +89,6 @@ import javax.annotation.Nullable;
 @ThreadCompatible
 public class CppCompileAction extends AbstractAction
     implements IncludeScannable, ExecutionInfoSpecifier, CommandAction {
-  public static final ObjectCodec<CppCompileAction> CODEC = new CppCompileAction_AutoCodec();
-
   private static final PathFragment BUILD_PATH_FRAGMENT = PathFragment.create("BUILD");
 
   private static final int VALIDATION_DEBUG = 0;  // 0==none, 1==warns/errors, 2==all
@@ -165,6 +162,7 @@ public class CppCompileAction extends AbstractAction
   private final Artifact sourceFile;
   private final Artifact optionalSourceFile;
   private final NestedSet<Artifact> mandatoryInputs;
+  private final Iterable<Artifact> inputsForInvalidation;
 
   /**
    * The set of input files that we add to the set of input artifacts of the action if we don't use
@@ -243,6 +241,8 @@ public class CppCompileAction extends AbstractAction
    * @param isStrictSystemIncludes should this compile action use strict system includes
    * @param mandatoryInputs any additional files that need to be present for the compilation to
    *     succeed, can be empty but not null, for example, extra sources for FDO.
+   * @param inputsForInvalidation are there only to invalidate this action when they change, but are
+   *     not needed during actual execution.
    * @param outputFile the object file that is written as result of the compilation, or the fake
    *     object for {@link FakeCppCompileAction}s
    * @param dotdFile the .d file that is generated as a side-effect of compilation
@@ -274,6 +274,7 @@ public class CppCompileAction extends AbstractAction
       boolean useHeaderModules,
       boolean isStrictSystemIncludes,
       NestedSet<Artifact> mandatoryInputs,
+      Iterable<Artifact> inputsForInvalidation,
       ImmutableList<Artifact> builtinIncludeFiles,
       NestedSet<Artifact> prunableInputs,
       Artifact outputFile,
@@ -309,6 +310,7 @@ public class CppCompileAction extends AbstractAction
         // We do not need to include the middleman artifact since it is a generated
         // artifact and will definitely exist prior to this action execution.
         mandatoryInputs,
+        inputsForInvalidation,
         prunableInputs,
         // inputsKnown begins as the logical negation of shouldScanIncludes.
         // When scanning includes, the inputs begin as not known, and become
@@ -356,6 +358,7 @@ public class CppCompileAction extends AbstractAction
       Artifact sourceFile,
       Artifact optionalSourceFile,
       NestedSet<Artifact> mandatoryInputs,
+      Iterable<Artifact> inputsForInvalidation,
       NestedSet<Artifact> prunableInputs,
       boolean shouldScanIncludes,
       boolean shouldPruneModules,
@@ -387,6 +390,7 @@ public class CppCompileAction extends AbstractAction
     this.sourceFile = sourceFile;
     this.optionalSourceFile = optionalSourceFile;
     this.mandatoryInputs = mandatoryInputs;
+    this.inputsForInvalidation = inputsForInvalidation;
     this.prunableInputs = prunableInputs;
     this.shouldScanIncludes = shouldScanIncludes;
     this.shouldPruneModules = shouldPruneModules;
@@ -1004,6 +1008,7 @@ public class CppCompileAction extends AbstractAction
       if (optionalSourceFile != null) {
         inputs.add(optionalSourceFile);
       }
+      inputs.addAll(inputsForInvalidation);
       inputs.addTransitive(discoveredInputs);
       updateInputs(inputs.build());
     } finally {
@@ -1116,11 +1121,10 @@ public class CppCompileAction extends AbstractAction
   }
 
   @Override
-  public String computeKey(ActionKeyContext actionKeyContext) {
-    Fingerprint f = new Fingerprint();
-    f.addUUID(actionClassId);
-    f.addStringMap(getEnvironment());
-    f.addStringMap(executionInfo);
+  public void computeKey(ActionKeyContext actionKeyContext, Fingerprint fp) {
+    fp.addUUID(actionClassId);
+    fp.addStringMap(getEnvironment());
+    fp.addStringMap(executionInfo);
 
     // For the argv part of the cache key, ignore all compiler flags that explicitly denote module
     // file (.pcm) inputs. Depending on input discovery, some of the unused ones are removed from
@@ -1129,7 +1133,7 @@ public class CppCompileAction extends AbstractAction
     // itself is fully determined by the input source files and module maps.
     // A better long-term solution would be to make the compiler to find them automatically and
     // never hand in the .pcm files explicitly on the command line in the first place.
-    f.addStrings(compileCommandLine.getArguments(/* overwrittenVariables= */ null));
+    fp.addStrings(compileCommandLine.getArguments(/* overwrittenVariables= */ null));
 
     /*
      * getArguments() above captures all changes which affect the compilation
@@ -1138,14 +1142,13 @@ public class CppCompileAction extends AbstractAction
      * that affect whether validateIncludes() will report an error or warning
      * have changed, otherwise we might miss some errors.
      */
-    f.addPaths(ccCompilationInfo.getDeclaredIncludeDirs());
-    f.addPaths(ccCompilationInfo.getDeclaredIncludeWarnDirs());
-    actionKeyContext.addNestedSetToFingerprint(f, ccCompilationInfo.getDeclaredIncludeSrcs());
-    f.addInt(0);  // mark the boundary between input types
-    actionKeyContext.addNestedSetToFingerprint(f, getMandatoryInputs());
-    f.addInt(0);
-    actionKeyContext.addNestedSetToFingerprint(f, prunableInputs);
-    return f.hexDigestAndReset();
+    fp.addPaths(ccCompilationInfo.getDeclaredIncludeDirs());
+    fp.addPaths(ccCompilationInfo.getDeclaredIncludeWarnDirs());
+    actionKeyContext.addNestedSetToFingerprint(fp, ccCompilationInfo.getDeclaredIncludeSrcs());
+    fp.addInt(0); // mark the boundary between input types
+    actionKeyContext.addNestedSetToFingerprint(fp, getMandatoryInputs());
+    fp.addInt(0);
+    actionKeyContext.addNestedSetToFingerprint(fp, prunableInputs);
   }
 
   @Override
@@ -1403,8 +1406,6 @@ public class CppCompileAction extends AbstractAction
    */
   @AutoCodec
   public static class DotdFile {
-    public static final ObjectCodec<DotdFile> CODEC = new CppCompileAction_DotdFile_AutoCodec();
-
     private final Artifact artifact;
     private final PathFragment execPath;
 

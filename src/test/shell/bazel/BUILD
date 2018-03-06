@@ -137,6 +137,7 @@ sh_test(
 
 sh_test(
     name = "bazel_test_test",
+    timeout = "long",
     srcs = ["bazel_test_test.sh"],
     data = [":test-deps"],
     shard_count = 3,
@@ -246,6 +247,7 @@ sh_test(
     size = "medium",
     srcs = ["external_patching_test.sh"],
     data = [":test-deps"],
+    shard_count = 3,
 )
 
 sh_test(
@@ -253,7 +255,7 @@ sh_test(
     size = "medium",
     srcs = ["external_path_test.sh"],
     data = [":test-deps"],
-    shard_count = 4,
+    shard_count = 6,
 )
 
 sh_test(

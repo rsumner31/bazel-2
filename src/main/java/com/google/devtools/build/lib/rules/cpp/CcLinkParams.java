@@ -27,7 +27,6 @@ import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.rules.cpp.LinkerInputs.LibraryToLink;
-import com.google.devtools.build.lib.skyframe.serialization.ObjectCodec;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec.VisibleForSerialization;
 import java.util.Collection;
@@ -45,20 +44,20 @@ import javax.annotation.Nullable;
  */
 @AutoCodec
 public final class CcLinkParams {
-  public static final ObjectCodec<CcLinkParams> CODEC = new CcLinkParams_AutoCodec();
-
   /**
    * A list of link options contributed by a single configured target.
    *
-   * <b>WARNING:</b> Do not implement {@code #equals()} in the obvious way. This class must be
+   * <p><b>WARNING:</b> Do not implement {@code #equals()} in the obvious way. This class must be
    * checked for equality by object identity because otherwise if two configured targets contribute
    * the same link options, they will be de-duplicated, which is not the desirable behavior.
    */
+  @AutoCodec
   @Immutable
   public static final class LinkOptions {
     private final ImmutableList<String> linkOptions;
 
-    private LinkOptions(Iterable<String> linkOptions) {
+    @VisibleForSerialization
+    LinkOptions(Iterable<String> linkOptions) {
       this.linkOptions = ImmutableList.copyOf(linkOptions);
     }
 
@@ -398,8 +397,6 @@ public final class CcLinkParams {
    */
   @AutoCodec
   public static final class Linkstamp {
-    public static final ObjectCodec<Linkstamp> CODEC = new CcLinkParams_Linkstamp_AutoCodec();
-
     private final Artifact artifact;
     private final NestedSet<Artifact> declaredIncludeSrcs;
 

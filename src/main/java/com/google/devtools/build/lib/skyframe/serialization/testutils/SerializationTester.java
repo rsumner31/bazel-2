@@ -21,15 +21,12 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.devtools.build.lib.skyframe.serialization.DeserializationContext;
-import com.google.devtools.build.lib.skyframe.serialization.SerializationContext;
+import com.google.devtools.build.lib.skyframe.serialization.AutoRegistry;
+import com.google.devtools.build.lib.skyframe.serialization.ObjectCodecRegistry;
+import com.google.devtools.build.lib.skyframe.serialization.ObjectCodecs;
 import com.google.devtools.build.lib.skyframe.serialization.SerializationException;
-import com.google.protobuf.CodedInputStream;
-import com.google.protobuf.CodedOutputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
+import com.google.protobuf.ByteString;
 import java.util.Random;
-import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -57,53 +54,67 @@ public class SerializationTester {
   }
 
   private final ImmutableList<Object> subjects;
-  private Supplier<SerializationContext> writeContextFactory =
-      () -> new SerializationContext(ImmutableMap.of());
-  private Supplier<DeserializationContext> readContextFactory =
-      () -> new DeserializationContext(ImmutableMap.of());
+  private final ImmutableMap.Builder<Class<?>, Object> dependenciesBuilder;
 
   @SuppressWarnings("rawtypes")
   private VerificationFunction verificationFunction =
       (original, deserialized) -> assertThat(deserialized).isEqualTo(original);
 
+  private int repetitions = 1;
+
   public SerializationTester(Object... subjects) {
-    Preconditions.checkArgument(subjects.length > 0);
-    this.subjects = ImmutableList.copyOf(subjects);
+    this(ImmutableList.copyOf(subjects));
   }
 
-  public SerializationTester setWriteContextFactory(
-      Supplier<SerializationContext> writeContextFactory) {
-    this.writeContextFactory = writeContextFactory;
-    return this;
+  public SerializationTester(ImmutableList<Object> subjects) {
+    Preconditions.checkArgument(!subjects.isEmpty());
+    this.subjects = subjects;
+    this.dependenciesBuilder = ImmutableMap.builder();
   }
 
-  public SerializationTester setReadContextFactory(
-      Supplier<DeserializationContext> readContextFactory) {
-    this.readContextFactory = readContextFactory;
+  public <D> SerializationTester addDependency(Class<? super D> type, D dependency) {
+    dependenciesBuilder.put(type, dependency);
     return this;
   }
 
   @SuppressWarnings("rawtypes")
-  public SerializationTester setVerificationFunction(VerificationFunction verificationFunction) {
+  public <T> SerializationTester setVerificationFunction(
+      VerificationFunction<T> verificationFunction) {
     this.verificationFunction = verificationFunction;
     return this;
   }
 
+  /** Sets the number of times to repeat serialization and deserialization. */
+  public SerializationTester setRepetitions(int repetitions) {
+    this.repetitions = repetitions;
+    return this;
+  }
+
   public void runTests() throws Exception {
-    testSerializeDeserialize();
-    testStableSerialization();
-    testDeserializeJunkData();
+    ObjectCodecRegistry registry = AutoRegistry.get();
+    ImmutableMap<Class<?>, Object> dependencies = dependenciesBuilder.build();
+    ObjectCodecRegistry.Builder registryBuilder = registry.getBuilder();
+    for (Object val : dependencies.values()) {
+      registryBuilder.addConstant(val);
+    }
+    ObjectCodecs codecs = new ObjectCodecs(registryBuilder.build(), dependencies);
+    testSerializeDeserialize(codecs);
+    testStableSerialization(codecs);
+    testDeserializeJunkData(codecs);
   }
 
   /** Runs serialization/deserialization tests. */
-  private void testSerializeDeserialize() throws Exception {
+  @SuppressWarnings("unchecked")
+  private void testSerializeDeserialize(ObjectCodecs codecs) throws Exception {
     Stopwatch timer = Stopwatch.createStarted();
     int totalBytes = 0;
-    for (Object subject : subjects) {
-      byte[] serialized = toBytes(subject);
-      totalBytes += serialized.length;
-      Object deserialized = fromBytes(serialized);
-      verificationFunction.verifyDeserialized(subject, deserialized);
+    for (int i = 0; i < repetitions; ++i) {
+      for (Object subject : subjects) {
+        ByteString serialized = codecs.serialize(subject);
+        totalBytes += serialized.size();
+        Object deserialized = codecs.deserialize(serialized);
+        verificationFunction.verifyDeserialized(subject, deserialized);
+      }
     }
     logger.log(
         Level.INFO,
@@ -115,41 +126,29 @@ public class SerializationTester {
   }
 
   /** Runs serialized bytes stability tests. */
-  private void testStableSerialization() throws IOException, SerializationException {
+  private void testStableSerialization(ObjectCodecs codecs) throws SerializationException {
     for (Object subject : subjects) {
-      byte[] serialized = toBytes(subject);
-      Object deserialized = fromBytes(serialized);
-      byte[] reserialized = toBytes(deserialized);
+      ByteString serialized = codecs.serialize(subject);
+      Object deserialized = codecs.deserialize(serialized);
+      ByteString reserialized = codecs.serialize(deserialized);
       assertThat(reserialized).isEqualTo(serialized);
     }
   }
 
   /** Runs junk-data recognition tests. */
-  private void testDeserializeJunkData() {
+  private static void testDeserializeJunkData(ObjectCodecs codecs) {
     Random rng = new Random(0);
     for (int i = 0; i < DEFAULT_JUNK_INPUTS; ++i) {
       byte[] junkData = new byte[rng.nextInt(JUNK_LENGTH_UPPER_BOUND)];
       rng.nextBytes(junkData);
       try {
-        readContextFactory.get().deserialize(CodedInputStream.newInstance(junkData));
+        codecs.deserialize(ByteString.copyFrom(junkData));
         // OK. Junk string was coincidentally parsed.
-      } catch (IOException | SerializationException e) {
+      } catch (SerializationException e) {
         // OK. Deserialization of junk failed.
         return;
       }
     }
     assert_().fail("all junk was parsed successfully");
-  }
-
-  private Object fromBytes(byte[] bytes) throws IOException, SerializationException {
-    return readContextFactory.get().deserialize(CodedInputStream.newInstance(bytes));
-  }
-
-  private byte[] toBytes(Object subject) throws IOException, SerializationException {
-    ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-    CodedOutputStream codedOut = CodedOutputStream.newInstance(bytes);
-    writeContextFactory.get().serialize(subject, codedOut);
-    codedOut.flush();
-    return bytes.toByteArray();
   }
 }

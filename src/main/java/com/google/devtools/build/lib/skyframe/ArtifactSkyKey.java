@@ -21,7 +21,6 @@ import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.concurrent.BlazeInterners;
 import com.google.devtools.build.lib.concurrent.ThreadSafety;
-import com.google.devtools.build.lib.skyframe.serialization.ObjectCodec;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec;
 import com.google.devtools.build.skyframe.SkyFunctionName;
 import com.google.devtools.build.skyframe.SkyKey;
@@ -56,7 +55,6 @@ import java.util.Collection;
 @AutoCodec
 public class ArtifactSkyKey implements SkyKey {
   private static final Interner<ArtifactSkyKey> INTERNER = BlazeInterners.newWeakInterner();
-  public static final ObjectCodec<ArtifactSkyKey> CODEC = new ArtifactSkyKey_AutoCodec();
   private static final Function<Artifact, SkyKey> TO_MANDATORY_KEY =
       artifact -> key(artifact, true);
   private static final Function<ArtifactSkyKey, Artifact> TO_ARTIFACT = ArtifactSkyKey::getArtifact;
@@ -111,10 +109,6 @@ public class ArtifactSkyKey implements SkyKey {
     return TO_ARTIFACT.apply((ArtifactSkyKey) key.argument());
   }
 
-  public static boolean equalWithOwner(Artifact first, Artifact second) {
-    return first.equals(second) && first.getArtifactOwner().equals(second.getArtifactOwner());
-  }
-
   @Override
   public SkyFunctionName functionName() {
     return SkyFunctions.ARTIFACT;
@@ -159,7 +153,7 @@ public class ArtifactSkyKey implements SkyKey {
       return false;
     }
     ArtifactSkyKey thatArtifactSkyKey = ((ArtifactSkyKey) that);
-    return equalWithOwner(artifact, thatArtifactSkyKey.artifact)
+    return Artifact.equalWithOwner(artifact, thatArtifactSkyKey.artifact)
         && isMandatory == thatArtifactSkyKey.isMandatory;
   }
 

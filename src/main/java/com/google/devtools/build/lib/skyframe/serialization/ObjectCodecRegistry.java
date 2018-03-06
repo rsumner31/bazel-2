@@ -14,12 +14,15 @@
 
 package com.google.devtools.build.lib.skyframe.serialization;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.CodedInputStream;
 import com.google.protobuf.CodedOutputStream;
 import java.io.IOException;
+import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 import javax.annotation.Nullable;
@@ -40,8 +43,12 @@ public class ObjectCodecRegistry {
   private final ImmutableList<CodecDescriptor> tagMappedCodecs;
   @Nullable
   private final CodecDescriptor defaultCodecDescriptor;
+  private final IdentityHashMap<Object, Integer> constantsMap;
+  private final ImmutableList<Object> constants;
+  private final int constantsStartTag;
 
-  private ObjectCodecRegistry(Map<String, CodecHolder> codecs, boolean allowDefaultCodec) {
+  private ObjectCodecRegistry(
+      Map<String, CodecHolder> codecs, ImmutableList<Object> constants, boolean allowDefaultCodec) {
     ImmutableMap.Builder<String, CodecDescriptor> codecMappingsBuilder = ImmutableMap.builder();
     int nextTag = 1; // 0 is reserved for null.
     for (String classifier : ImmutableList.sortedCopyOf(codecs.keySet())) {
@@ -53,8 +60,16 @@ public class ObjectCodecRegistry {
     this.byteStringMappedCodecs = makeByteStringMappedCodecs(stringMappedCodecs);
 
     this.defaultCodecDescriptor =
-        allowDefaultCodec ? new TypedCodecDescriptor<>(nextTag, new JavaSerializableCodec()) : null;
+        allowDefaultCodec
+            ? new TypedCodecDescriptor<>(nextTag++, new JavaSerializableCodec())
+            : null;
     this.tagMappedCodecs = makeTagMappedCodecs(stringMappedCodecs, defaultCodecDescriptor);
+    constantsStartTag = nextTag;
+    constantsMap = new IdentityHashMap<>();
+    for (Object constant : constants) {
+      constantsMap.put(constant, nextTag++);
+    }
+    this.constants = constants;
   }
 
   /** Returns the {@link CodecDescriptor} associated with the supplied classifier. */
@@ -107,6 +122,18 @@ public class ObjectCodecRegistry {
     return defaultCodecDescriptor;
   }
 
+  @Nullable
+  Object maybeGetConstantByTag(int tag) {
+    return tag < constantsStartTag || tag - constantsStartTag >= constants.size()
+        ? null
+        : constants.get(tag - constantsStartTag);
+  }
+
+  @Nullable
+  Integer maybeGetTagForConstant(Object object) {
+    return constantsMap.get(object);
+  }
+
   /** Returns the {@link CodecDescriptor} associated with the supplied tag. */
   public CodecDescriptor getCodecDescriptorByTag(int tag)
       throws SerializationException.NoCodecException {
@@ -121,6 +148,24 @@ public class ObjectCodecRegistry {
     } else {
       throw new SerializationException.NoCodecException("No codec available for tag " + tag);
     }
+  }
+
+  /**
+   * Creates a builder using the current contents of this registry.
+   *
+   * <p>This is much more efficient than scanning multiple times.
+   */
+  @VisibleForTesting
+  public Builder getBuilder() {
+    Builder builder = newBuilder();
+    builder.setAllowDefaultCodec(defaultCodecDescriptor != null);
+    for (Map.Entry<String, CodecDescriptor> entry : stringMappedCodecs.entrySet()) {
+      builder.add(entry.getKey(), entry.getValue().getCodec());
+    }
+    for (Object constant : constants) {
+      builder.addConstant(constant);
+    }
+    return builder;
   }
 
   /** Describes encoding logic. */
@@ -143,11 +188,7 @@ public class ObjectCodecRegistry {
      */
     int getTag();
 
-    /**
-     * Returns the underlying codec.
-     *
-     * <p>For backwards compatibility. New callers should prefer the methods above.
-     */
+    /** Returns the underlying codec. */
     ObjectCodec<?> getCodec();
   }
 
@@ -199,14 +240,18 @@ public class ObjectCodecRegistry {
     public CodecDescriptor createDescriptor(int tag) {
       return new TypedCodecDescriptor<T>(tag, codec);
     }
+
+    @Override
+    public String toString() {
+      return MoreObjects.toStringHelper(this).add("codec", codec).toString();
+    }
   }
 
   /** Builder for {@link ObjectCodecRegistry}. */
   public static class Builder {
     private final ImmutableMap.Builder<String, CodecHolder> codecsBuilder = ImmutableMap.builder();
+    private final ImmutableList.Builder<Object> constantsBuilder = ImmutableList.builder();
     private boolean allowDefaultCodec = true;
-
-    private Builder() {}
 
     /**
      * Add custom serialization strategy ({@code codec}) for {@code classifier}.
@@ -232,13 +277,19 @@ public class ObjectCodecRegistry {
       return this;
     }
 
+    public Builder addConstant(Object object) {
+      constantsBuilder.add(object);
+      return this;
+    }
+
     /** Wrap this builder with a {@link ClassKeyedBuilder}. */
     public ClassKeyedBuilder asClassKeyedBuilder() {
       return new ClassKeyedBuilder(this);
     }
 
     public ObjectCodecRegistry build() {
-      return new ObjectCodecRegistry(codecsBuilder.build(), allowDefaultCodec);
+      return new ObjectCodecRegistry(
+          codecsBuilder.build(), constantsBuilder.build(), allowDefaultCodec);
     }
   }
 

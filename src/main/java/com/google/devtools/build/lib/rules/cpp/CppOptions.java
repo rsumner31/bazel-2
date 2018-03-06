@@ -25,7 +25,6 @@ import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration.DynamicMode;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration.StripMode;
-import com.google.devtools.build.lib.skyframe.serialization.ObjectCodec;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec;
 import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.util.OptionsUtils;
@@ -47,8 +46,6 @@ import javax.annotation.Nullable;
 /** Command-line options for C++. */
 @AutoCodec(strategy = AutoCodec.Strategy.PUBLIC_FIELDS)
 public class CppOptions extends FragmentOptions {
-  public static final ObjectCodec<CppOptions> CODEC = new CppOptions_AutoCodec();
-
   /**
    * Converts a comma-separated list of compilation mode settings to a properly typed List.
    */
@@ -258,6 +255,18 @@ public class CppOptions extends FragmentOptions {
             + "in mostly static mode."
   )
   public DynamicMode dynamicMode;
+
+  @Option(
+      name = "experimental_drop_fully_static_linking_mode",
+      defaultValue = "false",
+      category = "semantics",
+      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
+      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS, OptionEffectTag.AFFECTS_OUTPUTS},
+      help =
+          "If enabled, bazel will not scan linkopts for -static. Rules have to define their fully"
+              + " static linking mode through 'link_fully_static_binary' feature."
+  )
+  public boolean dropFullyStaticLinkingMode;
 
   @Option(
     name = "experimental_link_compile_output_separately",

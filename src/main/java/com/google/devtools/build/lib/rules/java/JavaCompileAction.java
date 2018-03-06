@@ -15,14 +15,11 @@
 package com.google.devtools.build.lib.rules.java;
 
 import static com.google.common.base.Preconditions.checkNotNull;
-import static com.google.common.collect.Iterables.getOnlyElement;
-import static com.google.devtools.build.lib.packages.Aspect.INJECTING_RULE_KIND_PARAMETER_KEY;
 import static java.nio.charset.StandardCharsets.ISO_8859_1;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -31,7 +28,6 @@ import com.google.devtools.build.lib.actions.ActionEnvironment;
 import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.actions.ArtifactOwner;
 import com.google.devtools.build.lib.actions.ArtifactRoot;
 import com.google.devtools.build.lib.actions.CommandLine;
 import com.google.devtools.build.lib.actions.CommandLineExpansionException;
@@ -44,7 +40,6 @@ import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.FilesToRunProvider;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
-import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.CustomMultiArgv;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.VectorArg;
 import com.google.devtools.build.lib.analysis.actions.LazyWritePathsFileAction;
 import com.google.devtools.build.lib.analysis.actions.ParameterFileWriteAction;
@@ -58,7 +53,8 @@ import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadCompatible;
 import com.google.devtools.build.lib.rules.java.JavaConfiguration.JavaClasspathMode;
-import com.google.devtools.build.lib.skyframe.AspectValue;
+import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec;
+import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec.VisibleForSerialization;
 import com.google.devtools.build.lib.util.LazyString;
 import com.google.devtools.build.lib.util.StringCanonicalizer;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -66,13 +62,13 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Stream;
 import javax.annotation.Nullable;
 
 /** Action that represents a Java compilation. */
 @ThreadCompatible
 @Immutable
+@AutoCodec
 public final class JavaCompileAction extends SpawnAction {
   private static final String JACOCO_INSTRUMENTATION_PROCESSOR = "jacoco";
 
@@ -141,6 +137,9 @@ public final class JavaCompileAction extends SpawnAction {
    */
   private final BuildConfiguration.StrictDepsMode strictJavaDeps;
 
+  /** The tool with which to fix dependency errors. */
+  private final String fixDepsTool;
+
   /** The set of .jdeps artifacts provided by direct dependencies. */
   private final NestedSet<Artifact> compileTimeDependencyArtifacts;
 
@@ -168,10 +167,13 @@ public final class JavaCompileAction extends SpawnAction {
    * @param directJars the subset of classpath jars provided by direct dependencies
    * @param executionInfo the execution info
    * @param strictJavaDeps the Strict Java Deps mode
+   * @param fixDepsTool the tool with which to fix dependency errors
    * @param compileTimeDependencyArtifacts the jdeps files for direct dependencies
    * @param progressMessage the progress message
    */
-  private JavaCompileAction(
+  @VisibleForSerialization
+  @AutoCodec.Instantiator
+  JavaCompileAction(
       ActionOwner owner,
       NestedSet<Artifact> tools,
       NestedSet<Artifact> inputs,
@@ -192,9 +194,10 @@ public final class JavaCompileAction extends SpawnAction {
       NestedSet<Artifact> directJars,
       Map<String, String> executionInfo,
       StrictDepsMode strictJavaDeps,
+      String fixDepsTool,
       NestedSet<Artifact> compileTimeDependencyArtifacts,
       CharSequence progressMessage,
-      RunfilesSupplier runfiles) {
+      RunfilesSupplier runfilesSupplier) {
     super(
         owner,
         tools,
@@ -207,7 +210,7 @@ public final class JavaCompileAction extends SpawnAction {
         UTF8_ACTION_ENVIRONMENT,
         ImmutableMap.copyOf(executionInfo),
         progressMessage,
-        runfiles,
+        runfilesSupplier,
         "Javac",
         false /*executeUnconditionally*/,
         null /*extraActionInfoSupplier*/);
@@ -227,6 +230,7 @@ public final class JavaCompileAction extends SpawnAction {
     this.javacOpts = ImmutableList.copyOf(javacOpts);
     this.directJars = checkNotNull(directJars, "directJars must not be null");
     this.strictJavaDeps = strictJavaDeps;
+    this.fixDepsTool = checkNotNull(fixDepsTool);
     this.compileTimeDependencyArtifacts = compileTimeDependencyArtifacts;
   }
 
@@ -296,6 +300,10 @@ public final class JavaCompileAction extends SpawnAction {
   @VisibleForTesting
   public BuildConfiguration.StrictDepsMode getStrictJavaDepsMode() {
     return strictJavaDeps;
+  }
+
+  public String getFixDepsTool() {
+    return fixDepsTool;
   }
 
   public PathFragment getClassDirectory() {
@@ -380,54 +388,6 @@ public final class JavaCompileAction extends SpawnAction {
   }
 
   /**
-   * Builds the list of mappings between jars on the classpath and their originating targets names.
-   */
-  @VisibleForTesting
-  static class JarsToTargetsArgv extends CustomMultiArgv {
-    private final Iterable<Artifact> classpath;
-    private final NestedSet<Artifact> directJars;
-
-    @VisibleForTesting
-    JarsToTargetsArgv(Iterable<Artifact> classpath, NestedSet<Artifact> directJars) {
-      this.classpath = classpath;
-      this.directJars = directJars;
-    }
-
-    @Override
-    public Iterable<String> argv() {
-      Set<Artifact> directJarSet = directJars.toSet();
-      ImmutableList.Builder<String> builder = ImmutableList.builder();
-      for (Artifact jar : classpath) {
-        builder.add(directJarSet.contains(jar) ? "--direct_dependency" : "--indirect_dependency");
-        builder.add(jar.getExecPathString());
-        builder.add(getArtifactOwnerGeneralizedLabel(jar));
-      }
-      return builder.build();
-    }
-
-    private String getArtifactOwnerGeneralizedLabel(Artifact artifact) {
-      // The simple case can simply return the label,
-      // avoiding any concatenation or StringBuilder garbage
-      ArtifactOwner owner = checkNotNull(artifact.getArtifactOwner(), artifact);
-      Label label = owner.getLabel();
-      boolean isDefaultOrMain =
-          label.getPackageIdentifier().getRepository().isDefault()
-              || label.getPackageIdentifier().getRepository().isMain();
-      String result =
-          isDefaultOrMain ? label.toString() : "@" + label; // Escape '@' prefix for .params file.
-      if (owner instanceof AspectValue.AspectKey) {
-        AspectValue.AspectKey aspectOwner = (AspectValue.AspectKey) owner;
-        ImmutableCollection<String> injectingRuleKind =
-            aspectOwner.getParameters().getAttribute(INJECTING_RULE_KIND_PARAMETER_KEY);
-        if (injectingRuleKind.size() == 1) {
-          result += ' ' + getOnlyElement(injectingRuleKind);
-        }
-      }
-      return result;
-    }
-  }
-
-  /**
    * Tells {@link Builder} how to create new artifacts. Is there so that {@link Builder} can be
    * exercised in tests without creating a full {@link RuleContext}.
    */
@@ -472,6 +432,7 @@ public final class JavaCompileAction extends SpawnAction {
     private final Collection<Artifact> sourceJars = new ArrayList<>();
     private BuildConfiguration.StrictDepsMode strictJavaDeps =
         BuildConfiguration.StrictDepsMode.OFF;
+    private String fixDepsTool = "add_dep";
     private NestedSet<Artifact> directJars = NestedSetBuilder.emptySet(Order.NAIVE_LINK_ORDER);
     private NestedSet<Artifact> compileTimeDependencyArtifacts =
         NestedSetBuilder.emptySet(Order.STABLE_ORDER);
@@ -607,7 +568,6 @@ public final class JavaCompileAction extends SpawnAction {
             owner, artifactForExperimentalCoverage, sourceFiles, false));
       }
 
-
       NestedSet<Artifact> tools =
           NestedSetBuilder.<Artifact>stableOrder()
               .add(langtoolsJar)
@@ -655,6 +615,7 @@ public final class JavaCompileAction extends SpawnAction {
           directJars,
           executionInfo,
           strictJavaDeps,
+          fixDepsTool,
           compileTimeDependencyArtifacts,
           getProgressMessage(),
           javaBuilder.getRunfilesSupplier());
@@ -738,7 +699,7 @@ public final class JavaCompileAction extends SpawnAction {
       // written out and whether we try to minimize the compile-time classpath.
       if (strictJavaDeps != BuildConfiguration.StrictDepsMode.OFF) {
         result.add("--strict_java_deps", strictJavaDeps.toString());
-        result.addCustomMultiArgv(new JarsToTargetsArgv(classpathEntries, directJars));
+        result.addExecPaths("--direct_dependencies", directJars);
 
         if (configuration.getFragment(JavaConfiguration.class).getReduceJavaClasspath()
             == JavaClasspathMode.JAVABUILDER) {
@@ -749,6 +710,7 @@ public final class JavaCompileAction extends SpawnAction {
           }
         }
       }
+      result.add("--experimental_fix_deps_tool", fixDepsTool);
 
       // Chose what artifact to pass to JavaBuilder, as input to jacoco instrumentation processor.
       // metadata should be null when --experimental_java_coverage is true.
@@ -891,6 +853,12 @@ public final class JavaCompileAction extends SpawnAction {
      */
     public Builder setStrictJavaDeps(BuildConfiguration.StrictDepsMode strictDeps) {
       strictJavaDeps = strictDeps;
+      return this;
+    }
+
+    /** Sets the tool with which to fix dependency errors. */
+    public Builder setFixDepsTool(String depsTool) {
+      fixDepsTool = depsTool;
       return this;
     }
 

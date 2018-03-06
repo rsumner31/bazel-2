@@ -15,7 +15,7 @@
 package com.google.devtools.build.lib.skyframe.serialization;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.devtools.build.lib.testutil.MoreAsserts.expectThrows;
+import static com.google.devtools.build.lib.testutil.MoreAsserts.assertThrows;
 import static org.junit.Assert.fail;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.eq;
@@ -233,7 +233,7 @@ public class ObjectCodecsTest {
             ObjectCodecRegistry.newBuilder().setAllowDefaultCodec(false).build(),
             ImmutableMap.of());
     SerializationException.NoCodecException expected =
-        expectThrows(
+        assertThrows(
             SerializationException.NoCodecException.class, () -> underTest.serialize("X", "Y"));
     assertThat(expected)
         .hasMessageThat()
@@ -248,7 +248,7 @@ public class ObjectCodecsTest {
             ObjectCodecRegistry.newBuilder().setAllowDefaultCodec(false).build(),
             ImmutableMap.of());
     SerializationException.NoCodecException expected =
-        expectThrows(
+        assertThrows(
             SerializationException.NoCodecException.class,
             () -> underTest.deserialize(ByteString.copyFromUtf8("X"), serialized));
 
@@ -274,5 +274,12 @@ public class ObjectCodecsTest {
     assertThat(underTest.deserialize(KNOWN_CLASSIFIER_BYTES, codedIn)).isEqualTo(value1);
     assertThat(underTest.deserialize(KNOWN_CLASSIFIER_BYTES, codedIn)).isEqualTo(value2);
     assertThat(underTest.deserialize(KNOWN_CLASSIFIER_BYTES, codedIn)).isEqualTo(value3);
+  }
+
+  @Test
+  public void testSerializeDeserialize() throws Exception {
+    ObjectCodecs underTest = new ObjectCodecs(AutoRegistry.get(), ImmutableMap.of());
+    assertThat((String) underTest.deserialize(underTest.serialize("hello"))).isEqualTo("hello");
+    assertThat(underTest.deserialize(underTest.serialize(null))).isNull();
   }
 }
