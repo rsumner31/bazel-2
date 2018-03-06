@@ -1,3 +1,0 @@
-Prints the version information that was embedded when %{product} was built.
-
-%{options}

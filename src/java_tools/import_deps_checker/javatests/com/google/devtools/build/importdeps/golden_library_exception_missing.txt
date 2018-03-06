@@ -1,5 +1,0 @@
-Missing com.google.devtools.build.importdeps.testdata.LibraryException
-===Total===
-missing=1
-incomplete=0
-missing_members=0
